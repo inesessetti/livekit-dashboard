@@ -3,8 +3,10 @@
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
-from app.services.livekit import LiveKitClient, get_livekit_client
-from app.security.basic_auth import requires_admin, get_current_user
+from app.services.livekit import LiveKitClient, create_livekit_client
+from app.services.session import get_current_server_id
+from app.services.server_config import get_server_config_manager
+from app.security.session_auth import requires_admin_hybrid, get_current_user_hybrid
 from app.security.csrf import get_csrf_token
 
 
@@ -162,12 +164,19 @@ async def get_real_analytics_data(lk: LiveKitClient):
         return get_mock_analytics_data()
 
 
-@router.get("/", response_class=HTMLResponse, dependencies=[Depends(requires_admin)])
-async def overview(
-    request: Request,
-    lk: LiveKitClient = Depends(get_livekit_client),
-):
+@router.get("/", response_class=HTMLResponse)
+async def overview(request: Request, current_user: str = Depends(requires_admin_hybrid)):
     """Display overview dashboard with analytics and server stats"""
+    # Get current server ID from session
+    current_server_id = get_current_server_id(request)
+    if not current_server_id:
+        # This should be handled by middleware, but just in case
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/select-server", status_code=303)
+    
+    # Create LiveKit client for selected server
+    lk = create_livekit_client(current_server_id)
+    
     # Get server info (async)
     server_info = await lk.get_server_info()
     
@@ -197,8 +206,11 @@ async def overview(
     else:
         print("DEBUG: SIP is not enabled")
 
-    # Get current user
-    current_user = get_current_user(request)
+    # Current user is already provided by the dependency
+    
+    # Get server configuration data for template
+    server_manager = get_server_config_manager()
+    current_server_config = server_manager.get_server(current_server_id)
 
     return request.app.state.templates.TemplateResponse(
         "index.html.j2",
@@ -214,5 +226,7 @@ async def overview(
             "current_user": current_user,
             "sip_enabled": lk.sip_enabled,
             "csrf_token": get_csrf_token(request),
+            # Server info for display
+            "current_server_config": current_server_config,
         },
     )

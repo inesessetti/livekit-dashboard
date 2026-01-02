@@ -6,43 +6,47 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from typing import Optional, Dict, Any
 from urllib.parse import quote
 
-from app.services.livekit import LiveKitClient, get_livekit_client
-from app.security.basic_auth import requires_admin, get_current_user
+from app.services.livekit import LiveKitClient
+from app.security.session_auth import requires_admin_hybrid
 from app.security.csrf import get_csrf_token, verify_csrf_token
+from app.utils.route_helpers import get_livekit_client_for_request, get_base_template_context
 
 
 router = APIRouter()
 
 
-@router.get("/sip-outbound", response_class=HTMLResponse, dependencies=[Depends(requires_admin)])
+@router.get("/sip-outbound", response_class=HTMLResponse)
 async def sip_outbound_index(
     request: Request,
-    lk: LiveKitClient = Depends(get_livekit_client),
+    current_user: str = Depends(requires_admin_hybrid),
     flash_message: Optional[str] = None,
     flash_type: Optional[str] = None,
 ):
     """SIP outbound calls page"""
+    # Get LiveKit client for selected server
+    lk = get_livekit_client_for_request(request)
+    
     if not lk.sip_enabled:
         return RedirectResponse(url="/", status_code=303)
 
     trunks = await lk.list_sip_trunks()
-    current_user = get_current_user(request)
+
+    # Get base template context
+    template_data = get_base_template_context(request)
+    template_data.update({
+        "request": request,
+        "trunks": trunks,
+        "flash_message": flash_message,
+        "flash_type": flash_type,
+    })
 
     return request.app.state.templates.TemplateResponse(
         "sip/outbound.html.j2",
-        {
-            "request": request,
-            "trunks": trunks,
-            "current_user": current_user,
-            "sip_enabled": lk.sip_enabled,
-            "csrf_token": get_csrf_token(request),
-            "flash_message": flash_message,
-            "flash_type": flash_type,
-        },
+        template_data,
     )
 
 
-@router.post("/sip-outbound/create", dependencies=[Depends(requires_admin)])
+@router.post("/sip-outbound/create", )
 async def create_sip_call(
     request: Request,
     csrf_token: str = Form(...),
@@ -50,10 +54,13 @@ async def create_sip_call(
     sip_call_to: str = Form(...),
     room_name: str = Form(...),
     participant_identity: str = Form(...),
-    lk: LiveKitClient = Depends(get_livekit_client),
+    current_user: str = Depends(requires_admin_hybrid),
 ):
     """Create an outbound SIP call"""
     await verify_csrf_token(request)
+
+    # Get LiveKit client for selected server
+    lk = get_livekit_client_for_request(request)
 
     if not lk.sip_enabled:
         return RedirectResponse(url="/", status_code=303)
@@ -71,7 +78,7 @@ async def create_sip_call(
     return RedirectResponse(url="/sip-outbound", status_code=303)
 
 
-@router.post("/sip-outbound/trunk/create", dependencies=[Depends(requires_admin)])
+@router.post("/sip-outbound/trunk/create", )
 async def create_sip_trunk(
     request: Request,
     csrf_token: str = Form(...),
@@ -86,10 +93,13 @@ async def create_sip_trunk(
     headers: Optional[str] = Form(None),
     headers_to_attributes: Optional[str] = Form(None),
     json_data: Optional[str] = Form(None),
-    lk: LiveKitClient = Depends(get_livekit_client),
+    current_user: str = Depends(requires_admin_hybrid),
 ):
     """Create a new SIP outbound trunk"""
     await verify_csrf_token(request)
+
+    # Get LiveKit client for selected server
+    lk = get_livekit_client_for_request(request)
 
     if not lk.sip_enabled:
         return RedirectResponse(url="/", status_code=303)
@@ -148,7 +158,7 @@ async def create_sip_trunk(
         )
 
 
-@router.post("/sip-outbound/trunk/update", dependencies=[Depends(requires_admin)])
+@router.post("/sip-outbound/trunk/update", )
 async def update_sip_trunk(
     request: Request,
     csrf_token: str = Form(...),
@@ -164,10 +174,13 @@ async def update_sip_trunk(
     headers: Optional[str] = Form(None),
     headers_to_attributes: Optional[str] = Form(None),
     json_data: Optional[str] = Form(None),
-    lk: LiveKitClient = Depends(get_livekit_client),
+    current_user: str = Depends(requires_admin_hybrid),
 ):
     """Update an existing SIP outbound trunk"""
     await verify_csrf_token(request)
+
+    # Get LiveKit client for selected server
+    lk = get_livekit_client_for_request(request)
 
     if not lk.sip_enabled:
         return RedirectResponse(url="/", status_code=303)
@@ -237,15 +250,18 @@ async def update_sip_trunk(
         )
 
 
-@router.post("/sip-outbound/trunk/delete", dependencies=[Depends(requires_admin)])
+@router.post("/sip-outbound/trunk/delete", )
 async def delete_sip_trunk(
     request: Request,
     csrf_token: str = Form(...),
     sip_trunk_id: str = Form(...),
-    lk: LiveKitClient = Depends(get_livekit_client),
+    current_user: str = Depends(requires_admin_hybrid),
 ):
     """Delete a SIP outbound trunk"""
     await verify_csrf_token(request)
+
+    # Get LiveKit client for selected server
+    lk = get_livekit_client_for_request(request)
 
     if not lk.sip_enabled:
         return RedirectResponse(url="/", status_code=303)
@@ -273,20 +289,22 @@ async def delete_sip_trunk(
         )
 
 
-@router.get("/sip-inbound", response_class=HTMLResponse, dependencies=[Depends(requires_admin)])
+@router.get("/sip-inbound", response_class=HTMLResponse, )
 async def sip_inbound_index(
     request: Request,
-    lk: LiveKitClient = Depends(get_livekit_client),
+    current_user: str = Depends(requires_admin_hybrid),
     flash_message: Optional[str] = None,
     flash_type: Optional[str] = None,
 ):
     """SIP inbound rules page"""
+    # Get LiveKit client for selected server
+    lk = get_livekit_client_for_request(request)
+    
     if not lk.sip_enabled:
         return RedirectResponse(url="/", status_code=303)
 
     rules = await lk.list_sip_dispatch_rules()
     trunks = await lk.list_sip_inbound_trunks()
-    current_user = get_current_user(request)
 
     return request.app.state.templates.TemplateResponse(
         "sip/inbound.html.j2",
@@ -303,7 +321,7 @@ async def sip_inbound_index(
     )
 
 
-@router.post("/sip-inbound/trunk/create", dependencies=[Depends(requires_admin)])
+@router.post("/sip-inbound/trunk/create", )
 async def create_sip_inbound_trunk(
     request: Request,
     csrf_token: str = Form(...),
@@ -314,7 +332,7 @@ async def create_sip_inbound_trunk(
     username: Optional[str] = Form(None),
     password: Optional[str] = Form(None),
     metadata: Optional[str] = Form(None),
-    lk: LiveKitClient = Depends(get_livekit_client),
+    current_user: str = Depends(requires_admin_hybrid),
 ):
     """Create a new SIP inbound trunk"""
     await verify_csrf_token(request)
@@ -365,7 +383,7 @@ async def create_sip_inbound_trunk(
         )
 
 
-@router.post("/sip-inbound/trunk/update", dependencies=[Depends(requires_admin)])
+@router.post("/sip-inbound/trunk/update", )
 async def update_sip_inbound_trunk(
     request: Request,
     csrf_token: str = Form(...),
@@ -377,7 +395,7 @@ async def update_sip_inbound_trunk(
     username: Optional[str] = Form(None),
     password: Optional[str] = Form(None),
     metadata: Optional[str] = Form(None),
-    lk: LiveKitClient = Depends(get_livekit_client),
+    current_user: str = Depends(requires_admin_hybrid),
 ):
     """Update an existing SIP inbound trunk"""
     await verify_csrf_token(request)
@@ -429,12 +447,12 @@ async def update_sip_inbound_trunk(
         )
 
 
-@router.post("/sip-inbound/trunk/delete", dependencies=[Depends(requires_admin)])
+@router.post("/sip-inbound/trunk/delete", )
 async def delete_sip_inbound_trunk(
     request: Request,
     csrf_token: str = Form(...),
     sip_trunk_id: str = Form(...),
-    lk: LiveKitClient = Depends(get_livekit_client),
+    current_user: str = Depends(requires_admin_hybrid),
 ):
     """Delete a SIP inbound trunk"""
     await verify_csrf_token(request)
@@ -464,7 +482,7 @@ async def delete_sip_inbound_trunk(
         )
 
 
-@router.post("/sip-inbound/rule/create", dependencies=[Depends(requires_admin)])
+@router.post("/sip-inbound/rule/create", )
 async def create_dispatch_rule(
     request: Request,
     csrf_token: str = Form(...),
@@ -480,7 +498,7 @@ async def create_dispatch_rule(
     agent_metadata: Optional[str] = Form(None),
     metadata: Optional[str] = Form(None),
     plain_json: Optional[str] = Form(None),
-    lk: LiveKitClient = Depends(get_livekit_client),
+    current_user: str = Depends(requires_admin_hybrid),
 ):
     """Create a new SIP dispatch rule"""
     await verify_csrf_token(request)
@@ -539,7 +557,7 @@ async def create_dispatch_rule(
         )
 
 
-@router.post("/sip-inbound/rule/update", dependencies=[Depends(requires_admin)])
+@router.post("/sip-inbound/rule/update", )
 async def update_dispatch_rule(
     request: Request,
     csrf_token: str = Form(...),
@@ -556,7 +574,7 @@ async def update_dispatch_rule(
     agent_metadata: Optional[str] = Form(None),
     metadata: Optional[str] = Form(None),
     plain_json: Optional[str] = Form(None),
-    lk: LiveKitClient = Depends(get_livekit_client),
+    current_user: str = Depends(requires_admin_hybrid),
 ):
     """Update an existing SIP dispatch rule"""
     await verify_csrf_token(request)
@@ -605,12 +623,12 @@ async def update_dispatch_rule(
         )
 
 
-@router.post("/sip-inbound/rule/delete", dependencies=[Depends(requires_admin)])
+@router.post("/sip-inbound/rule/delete", )
 async def delete_dispatch_rule(
     request: Request,
     csrf_token: str = Form(...),
     sip_dispatch_rule_id: str = Form(...),
-    lk: LiveKitClient = Depends(get_livekit_client),
+    current_user: str = Depends(requires_admin_hybrid),
 ):
     """Delete a SIP dispatch rule"""
     await verify_csrf_token(request)

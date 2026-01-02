@@ -4,22 +4,26 @@ from fastapi import APIRouter, Depends, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from typing import Optional
 
-from app.services.livekit import LiveKitClient, get_livekit_client
-from app.security.basic_auth import requires_admin, get_current_user
+from app.services.livekit import LiveKitClient
+from app.security.session_auth import requires_admin_hybrid
 from app.security.csrf import get_csrf_token, verify_csrf_token
+from app.utils.route_helpers import get_livekit_client_for_request, get_base_template_context
 
 
 router = APIRouter()
 
 
-@router.get("/rooms", response_class=HTMLResponse, dependencies=[Depends(requires_admin)])
+@router.get("/rooms", response_class=HTMLResponse)
 async def rooms_index(
     request: Request,
     search: Optional[str] = None,
     partial: Optional[str] = None,
-    lk: LiveKitClient = Depends(get_livekit_client),
+    current_user: str = Depends(requires_admin_hybrid),
 ):
     """List all rooms with optional search"""
+    # Get LiveKit client for selected server
+    lk = get_livekit_client_for_request(request)
+    
     rooms, latency = await lk.list_rooms()
     latency_ms = round(latency * 1000, 2)
 
@@ -27,17 +31,14 @@ async def rooms_index(
     if search:
         rooms = [r for r in rooms if search.lower() in r.name.lower()]
 
-    current_user = get_current_user(request)
-
-    template_data = {
+    # Get base template context
+    template_data = get_base_template_context(request)
+    template_data.update({
         "request": request,
         "rooms": rooms,
         "latency_ms": latency_ms,
         "search": search,
-        "current_user": current_user,
-        "sip_enabled": lk.sip_enabled,
-        "csrf_token": get_csrf_token(request),
-    }
+    })
 
     # Return partial template for HTMX polling
     if partial:
@@ -52,7 +53,7 @@ async def rooms_index(
     )
 
 
-@router.post("/rooms", dependencies=[Depends(requires_admin)])
+@router.post("/rooms")
 async def create_room(
     request: Request,
     csrf_token: str = Form(...),
@@ -60,10 +61,13 @@ async def create_room(
     max_participants: int = Form(100),
     empty_timeout: int = Form(300),
     metadata: str = Form(""),
-    lk: LiveKitClient = Depends(get_livekit_client),
+    current_user: str = Depends(requires_admin_hybrid),
 ):
     """Create a new room"""
     await verify_csrf_token(request)
+    
+    # Get LiveKit client for selected server
+    lk = get_livekit_client_for_request(request)
 
     try:
         await lk.create_room(
@@ -78,18 +82,18 @@ async def create_room(
             # Return just the rooms list for HTMX
             rooms, latency = await lk.list_rooms()
             latency_ms = round(latency * 1000, 2)
-            current_user = get_current_user(request)
+            
+            # Get base template context
+            template_data = get_base_template_context(request)
+            template_data.update({
+                "request": request,
+                "rooms": rooms,
+                "latency_ms": latency_ms,
+            })
             
             return request.app.state.templates.TemplateResponse(
                 "rooms/_rooms_table.html.j2",
-                {
-                    "request": request,
-                    "rooms": rooms,
-                    "latency_ms": latency_ms,
-                    "current_user": current_user,
-                    "sip_enabled": lk.sip_enabled,
-                    "csrf_token": get_csrf_token(request),
-                },
+                template_data,
             )
         
         return RedirectResponse(url="/rooms", status_code=303)
@@ -100,31 +104,32 @@ async def create_room(
 
 
 @router.get(
-    "/rooms/{room_name}", response_class=HTMLResponse, dependencies=[Depends(requires_admin)]
+    "/rooms/{room_name}", response_class=HTMLResponse
 )
 async def room_detail(
     request: Request,
     room_name: str,
     partial: Optional[str] = None,
-    lk: LiveKitClient = Depends(get_livekit_client),
+    current_user: str = Depends(requires_admin_hybrid),
 ):
     """Display room details and participants"""
+    # Get LiveKit client for selected server
+    lk = get_livekit_client_for_request(request)
+    
     rooms, _ = await lk.list_rooms(names=[room_name])
     room = rooms[0] if rooms else None
     if not room:
         return RedirectResponse(url="/rooms", status_code=303)
 
     participants = await lk.list_participants(room_name)
-    current_user = get_current_user(request)
 
-    template_data = {
+    # Get base template context
+    template_data = get_base_template_context(request)
+    template_data.update({
         "request": request,
         "room": room,
         "participants": participants,
-        "current_user": current_user,
-        "sip_enabled": lk.sip_enabled,
-        "csrf_token": get_csrf_token(request),
-    }
+    })
 
     # Return partial for HTMX polling
     if partial:
@@ -139,15 +144,18 @@ async def room_detail(
     )
 
 
-@router.post("/rooms/{room_name}/delete", dependencies=[Depends(requires_admin)])
+@router.post("/rooms/{room_name}/delete")
 async def delete_room(
     request: Request,
     room_name: str,
     csrf_token: str = Form(...),
-    lk: LiveKitClient = Depends(get_livekit_client),
+    current_user: str = Depends(requires_admin_hybrid),
 ):
     """Delete/close a room"""
     await verify_csrf_token(request)
+    
+    # Get LiveKit client for selected server
+    lk = get_livekit_client_for_request(request)
     
     try:
         await lk.delete_room(room_name)
@@ -159,7 +167,6 @@ async def delete_room(
         # Return updated rooms list
         rooms, latency = await lk.list_rooms()
         latency_ms = round(latency * 1000, 2)
-        current_user = get_current_user(request)
         
         # Return just the rooms table HTML
         return request.app.state.templates.TemplateResponse(
@@ -177,7 +184,7 @@ async def delete_room(
     return RedirectResponse(url="/rooms", status_code=303)
 
 
-@router.post("/rooms/{room_name}/token", dependencies=[Depends(requires_admin)])
+@router.post("/rooms/{room_name}/token")
 async def generate_room_token(
     request: Request,
     room_name: str,
@@ -187,10 +194,13 @@ async def generate_room_token(
     ttl: int = Form(3600),
     can_publish: Optional[str] = Form(None),
     can_subscribe: Optional[str] = Form(None),
-    lk: LiveKitClient = Depends(get_livekit_client),
+    current_user: str = Depends(requires_admin_hybrid),
 ):
     """Generate a join token for the room"""
     await verify_csrf_token(request)
+
+    # Get LiveKit client for selected server
+    lk = get_livekit_client_for_request(request)
 
     try:
         token = lk.generate_token(
@@ -216,17 +226,19 @@ async def generate_room_token(
 
 @router.post(
     "/rooms/{room_name}/participants/{identity}/kick",
-    dependencies=[Depends(requires_admin)],
 )
 async def kick_participant(
     request: Request,
     room_name: str,
     identity: str,
     csrf_token: str = Form(...),
-    lk: LiveKitClient = Depends(get_livekit_client),
+    current_user: str = Depends(requires_admin_hybrid),
 ):
     """Kick a participant from the room"""
     await verify_csrf_token(request)
+
+    # Get LiveKit client for selected server
+    lk = get_livekit_client_for_request(request)
 
     try:
         await lk.remove_participant(room_name, identity)
@@ -238,7 +250,6 @@ async def kick_participant(
 
 @router.post(
     "/rooms/{room_name}/participants/{identity}/mute",
-    dependencies=[Depends(requires_admin)],
 )
 async def mute_participant(
     request: Request,
@@ -247,10 +258,13 @@ async def mute_participant(
     csrf_token: str = Form(...),
     track_sid: str = Form(...),
     muted: bool = Form(...),
-    lk: LiveKitClient = Depends(get_livekit_client),
+    current_user: str = Depends(requires_admin_hybrid),
 ):
     """Mute/unmute a participant's track"""
     await verify_csrf_token(request)
+
+    # Get LiveKit client for selected server
+    lk = get_livekit_client_for_request(request)
 
     try:
         await lk.mute_participant_track(room_name, identity, track_sid, muted)
@@ -260,16 +274,16 @@ async def mute_participant(
     return RedirectResponse(url=f"/rooms/{room_name}", status_code=303)
 
 
-@router.get(
-    "/rooms/{room_name}/rtc-stats", 
-    dependencies=[Depends(requires_admin)]
-)
+@router.get("/rooms/{room_name}/rtc-stats")
 async def get_room_rtc_stats(
     request: Request,
     room_name: str,
-    lk: LiveKitClient = Depends(get_livekit_client),
+    current_user: str = Depends(requires_admin_hybrid),
 ):
     """Get RTC statistics for a room via direct connection"""
+    # Get LiveKit client for selected server
+    lk = get_livekit_client_for_request(request)
+    
     try:
         stats_dict, latency = await lk.get_room_rtc_stats(room_name)
         

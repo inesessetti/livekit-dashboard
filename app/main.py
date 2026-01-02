@@ -17,8 +17,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.routes import overview, rooms, egress, sip, settings, sandbox, auth
+from app.routes import overview, rooms, egress, sip, settings, sandbox, auth, server_selection
 from app.security.csrf import get_csrf_token
+from app.security.session_auth import SessionAuth
+from app.services.session import has_server_selection
+from app.services.server_config import get_server_config_manager
 
 
 @asynccontextmanager
@@ -88,6 +91,7 @@ app.state.templates = templates
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 # Include routers
+app.include_router(server_selection.router, tags=["Server Selection"])
 app.include_router(overview.router, tags=["Overview"])
 app.include_router(rooms.router, tags=["Rooms"])
 app.include_router(egress.router, tags=["Egress"])
@@ -95,6 +99,36 @@ app.include_router(sip.router, tags=["SIP"])
 app.include_router(settings.router, tags=["Settings"])
 app.include_router(sandbox.router, tags=["Sandbox"])
 app.include_router(auth.router, tags=["Auth"])
+
+
+# Server selection middleware
+@app.middleware("http")
+async def server_selection_middleware(request: Request, call_next):
+    """Redirect to server selection if no server is chosen"""
+    # Skip middleware for auth routes, static files, and health check
+    skip_paths = ["/login", "/logout", "/logout-clear-auth", "/select-server", "/static/", "/health"]
+    if any(request.url.path.startswith(path) for path in skip_paths):
+        return await call_next(request)
+    
+    # Check authentication and server selection
+    try:
+        # First check if user is authenticated
+        if not SessionAuth.is_authenticated(request):
+            # Not authenticated - redirect to login
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(url="/login", status_code=303)
+        
+        # User is authenticated - check server selection for multi-server setups
+        manager = get_server_config_manager()
+        if manager.has_multiple_servers() and not has_server_selection(request):
+            # Redirect to server selection page
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(url="/select-server", status_code=303)
+    except Exception:
+        # If there's an error, continue normally
+        pass
+    
+    return await call_next(request)
 
 
 # Security headers middleware

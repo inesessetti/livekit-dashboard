@@ -1,28 +1,33 @@
-"""LiveKit SDK Client Wrapper - Pure Async Version"""
+"""LiveKit SDK Client Wrapper - Pure Async Version with Multi-Server Support"""
 
 import asyncio
 import base64
 import json
 import os
 import time
+from datetime import timedelta
 from typing import List, Optional, Tuple, Dict, Any
 
 from livekit import api, rtc
+from .server_config import ServerConfig, get_server_config
 
 
 class LiveKitClient:
     """Wrapper for LiveKit SDK clients with error handling and metrics - Pure Async"""
 
-    def __init__(self):
-        self.url = os.environ["LIVEKIT_URL"]
-        self.key = os.environ["LIVEKIT_API_KEY"]
-        self.secret = os.environ["LIVEKIT_API_SECRET"]
+    def __init__(self, server_id: Optional[str] = None):
+        # Get server configuration
+        self.server_config = get_server_config(server_id)
+        self.server_id = self.server_config.id
+        
+        # Set connection parameters from config
+        self.url = self.server_config.url
+        self.key = self.server_config.api_key
+        self.secret = self.server_config.api_secret
+        self.sip_enabled = self.server_config.sip_enabled
 
         # Don't create the API instance here - do it lazily in async context
         self._lk_api = None
-
-        # SIP is optional
-        self.sip_enabled = os.environ.get("ENABLE_SIP", "false").lower() == "true"
 
     async def _get_api(self):
         """Get or create LiveKit API instance in async context"""
@@ -197,7 +202,7 @@ class LiveKitClient:
             .with_name(name or identity)
             .with_metadata(metadata)
             .with_grants(grant)
-            .with_ttl(ttl)
+            .with_ttl(timedelta(seconds=ttl))
         )
 
         return token.to_jwt()
@@ -221,6 +226,10 @@ class LiveKitClient:
         """Start a room composite egress"""
         lk = await self._get_api()
 
+        # Ensure the output filename includes the output directory path
+        if not output_filename.startswith('/'):
+            output_filename = f"/out/{output_filename}"
+            
         file_output = api.EncodedFileOutput(
             file_type=api.EncodedFileType.MP4,
             filepath=output_filename,
@@ -1566,6 +1575,11 @@ class LiveKitClient:
 
 
 # Dependency injection helper
-def get_livekit_client() -> LiveKitClient:
-    """FastAPI dependency to get LiveKit client"""
-    return LiveKitClient()
+def get_livekit_client(server_id: Optional[str] = None) -> LiveKitClient:
+    """FastAPI dependency to get LiveKit client for specified server"""
+    return LiveKitClient(server_id)
+
+
+def create_livekit_client(server_id: Optional[str] = None) -> LiveKitClient:
+    """Factory function to create LiveKit client for specified server"""
+    return LiveKitClient(server_id)

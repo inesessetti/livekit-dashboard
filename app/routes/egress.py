@@ -5,31 +5,33 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from typing import Optional
 from datetime import datetime
 
-from app.services.livekit import LiveKitClient, get_livekit_client
-from app.security.basic_auth import requires_admin, get_current_user
+from app.services.livekit import LiveKitClient
+from app.security.session_auth import requires_admin_hybrid
 from app.security.csrf import get_csrf_token, verify_csrf_token
+from app.utils.route_helpers import get_livekit_client_for_request, get_base_template_context
 
 
 router = APIRouter()
 
 
-@router.get("/egress", response_class=HTMLResponse, dependencies=[Depends(requires_admin)])
+@router.get("/egress", response_class=HTMLResponse, )
 async def egress_index(
     request: Request,
     partial: Optional[str] = None,
-    lk: LiveKitClient = Depends(get_livekit_client),
+    current_user: str = Depends(requires_admin_hybrid),
 ):
     """List all egress jobs"""
+    # Get LiveKit client for selected server
+    lk = get_livekit_client_for_request(request)
+    
     egress_jobs = await lk.list_egress(active=True)
-    current_user = get_current_user(request)
 
-    template_data = {
+    # Get base template context
+    template_data = get_base_template_context(request)
+    template_data.update({
         "request": request,
         "egress_jobs": egress_jobs,
-        "current_user": current_user,
-        "sip_enabled": lk.sip_enabled,
-        "csrf_token": get_csrf_token(request),
-    }
+    })
 
     # Return partial for HTMX polling
     if partial:
@@ -44,7 +46,7 @@ async def egress_index(
     )
 
 
-@router.post("/egress/start", dependencies=[Depends(requires_admin)])
+@router.post("/egress/start", )
 async def start_egress(
     request: Request,
     csrf_token: str = Form(...),
@@ -53,10 +55,13 @@ async def start_egress(
     layout: str = Form("grid"),
     audio_only: Optional[str] = Form(None),
     video_only: Optional[str] = Form(None),
-    lk: LiveKitClient = Depends(get_livekit_client),
+    current_user: str = Depends(requires_admin_hybrid),
 ):
     """Start a room composite egress"""
     await verify_csrf_token(request)
+
+    # Get LiveKit client for selected server
+    lk = get_livekit_client_for_request(request)
 
     try:
         # Replace placeholders in filename
@@ -76,15 +81,18 @@ async def start_egress(
     return RedirectResponse(url="/egress", status_code=303)
 
 
-@router.post("/egress/{egress_id}/stop", dependencies=[Depends(requires_admin)])
+@router.post("/egress/{egress_id}/stop", )
 async def stop_egress(
     request: Request,
     egress_id: str,
     csrf_token: str = Form(...),
-    lk: LiveKitClient = Depends(get_livekit_client),
+    current_user: str = Depends(requires_admin_hybrid),
 ):
     """Stop an egress job"""
     await verify_csrf_token(request)
+    
+    # Get LiveKit client for selected server
+    lk = get_livekit_client_for_request(request)
     
     try:
         await lk.stop_egress(egress_id)

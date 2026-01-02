@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Select LiveKit Server - LiveKit Dashboard</title>
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="/static/css/style.css?v={{ range(1000, 9999) | random }}">
+    
+    <!-- HTMX CSRF Token Configuration -->
+    <meta name="csrf-token" content="{{ csrf_token }}">
+</head>
+<body data-bs-theme="dark" class="d-flex align-items-center justify-content-center min-vh-100">
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-md-8 col-lg-6">
+                <div class="card">
+                    <div class="card-header text-center">
+                        <h3 class="card-title mb-0">
+                            <i class="bi bi-broadcast me-2"></i>
+                            LiveKit Dashboard
+                        </h3>
+                        <p class="text-muted mt-2 mb-0">Select your LiveKit server to continue</p>
+                    </div>
+                    <div class="card-body">
+                        {% if error %}
+                        <div class="alert alert-danger" role="alert">
+                            <i class="bi bi-exclamation-triangle me-2"></i>
+                            {{ error }}
+                        </div>
+                        {% endif %}
+                        
+                        <form method="post" action="/select-server">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            
+                            <div class="mb-4">
+                                <label class="form-label">Choose Server:</label>
+                                <div class="server-options">
+                                    {% for server in servers %}
+                                    <div class="form-check mb-3">
+                                        <input class="form-check-input" type="radio" name="server_id" 
+                                               id="server_{{ server.id }}" value="{{ server.id }}"
+                                               {% if loop.first %}checked{% endif %}>
+                                        <label class="form-check-label w-100" for="server_{{ server.id }}">
+                                            <div class="server-option-card">
+                                                <div class="d-flex justify-content-between align-items-start">
+                                                    <div class="flex-grow-1">
+                                                        <div class="server-name">{{ server.name }}</div>
+                                                        <div class="server-url text-muted">{{ server.url }}</div>
+                                                        {% if server.description %}
+                                                        <div class="server-description text-muted small mt-1">{{ server.description }}</div>
+                                                        {% endif %}
+                                                    </div>
+                                                    <div class="server-badges">
+                                                        {% if server.sip_enabled %}
+                                                        <span class="badge badge-info">SIP Enabled</span>
+                                                        {% endif %}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </label>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            
+                            <div class="d-grid">
+                                <button type="submit" class="btn btn-primary btn-lg">
+                                    <i class="bi bi-arrow-right me-2"></i>
+                                    Connect to Server
+                                </button>
+                            </div>
+                        </form>
+                        
+                        <div class="text-center mt-3">
+                            <small class="text-muted">
+                                <i class="bi bi-info-circle me-1"></i>
+                                You can change servers by logging out and logging back in
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <style>
+        .server-option-card {
+            padding: 1.25rem;
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            background-color: var(--bg-tertiary);
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+        
+        .form-check-input:checked + .form-check-label .server-option-card {
+            border-color: var(--brand-primary);
+            background-color: rgba(91, 139, 255, 0.1);
+        }
+        
+        .server-name {
+            font-weight: 600;
+            color: var(--text-primary);
+            font-size: 1.1rem;
+        }
+        
+        .server-url {
+            font-size: 0.875rem;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            margin-top: 0.25rem;
+        }
+        
+        .server-description {
+            margin-top: 0.5rem;
+        }
+        
+        .form-check-label {
+            cursor: pointer;
+        }
+        
+        .server-option-card:hover {
+            border-color: var(--border-hover);
+            background-color: var(--bg-hover);
+        }
+        
+        .form-check-input:checked + .form-check-label .server-option-card:hover {
+            border-color: var(--brand-primary);
+            background-color: rgba(91, 139, 255, 0.15);
+        }
+        
+        .server-badges {
+            margin-left: 1rem;
+        }
+        
+        .badge-info {
+            background-color: rgba(59, 130, 246, 0.2);
+            color: var(--info);
+            font-size: 0.75rem;
+        }
+        
+        .card {
+            box-shadow: var(--shadow-lg);
+        }
+        
+        .btn-lg {
+            padding: 0.75rem 1.5rem;
+            font-size: 1rem;
+        }
+    </style>
+</body>
+</html>
